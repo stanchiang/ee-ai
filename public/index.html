@@ -29,18 +29,20 @@
 
   <body class="bg-gray-100 flex flex-col h-screen">
     <!-- Navigation Bar -->
-    <nav class="bg-white shadow-md flex-shrink-0">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex justify-between h-16">
-          <div class="flex items-center">
-            <div class="flex-shrink-0 flex items-center">
-              <span class="text-2xl font-bold text-indigo-600">WildAI</span>
-              <span class="ml-2 text-gray-600">Hardware Dev. Made Easy.</span>
+    <div id="navBar" style="display: none;">
+      <nav class="bg-white shadow-md flex-shrink-0">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div class="flex justify-between h-16">
+            <div class="flex items-center">
+              <div class="flex-shrink-0 flex items-center">
+                <span class="text-2xl font-bold text-indigo-600">WildAI</span>
+                <span class="ml-2 text-gray-600">Hardware Dev. Made Easy.</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </nav>
+      </nav>
+    </div>
 
     <!-- Main Content -->
     <div id="root" class="flex-1 overflow-hidden"></div>
@@ -74,6 +76,7 @@
         ]);
         const [input, setInput] = useState("");
         const [images, setImages] = useState([]);
+        const [hasInteracted, setHasInteracted] = useState(false);
 
         /* viewer tabs */
         const [schematic, setSchematic] = useState("");
@@ -93,10 +96,23 @@
           });
         }, [messages]);
 
+        /* Update nav bar visibility */
+        useEffect(() => {
+          const navBar = document.getElementById('navBar');
+          if (navBar) {
+            navBar.style.display = hasInteracted ? 'block' : 'none';
+          }
+        }, [hasInteracted]);
+
         /* ---------- send ---------- */
         async function send() {
           const text = input.trim();
           if (!text && images.length === 0) return;
+
+          // Set hasInteracted to true on first interaction
+          if (!hasInteracted) {
+            setHasInteracted(true);
+          }
 
           // Check if this is a question about the existing design
           const isQuestion = /^(what|how|why|explain|describe|tell me about|can you explain|what is|what are|how does|why does)/i.test(text);
@@ -336,336 +352,399 @@
 
         /* ---------- UI ---------- */
         return (
-          <div className="split-layout flex h-full">
-            {/* Chat column */}
-            <div className="flex flex-col flex-1 max-w-2xl mx-auto p-4 gap-2">
-              {/* chat list */}
-              <div
-                ref={listRef}
-                className="flex-1 overflow-y-auto rounded-2xl p-4 space-y-4"
-              >
-                {messages
-                  .filter((m) => m.role !== "system")
-                  .map((m, i) => (
-                    <div
-                      key={i}
-                      className={
-                        "whitespace-pre-wrap rounded-2xl p-3 shadow overflow-x-auto overflow-y-auto " +
-                        (m.role === "user"
-                          ? "bg-indigo-600 text-white self-end"
-                          : "bg-white text-gray-900 self-start")
-                      }
-                    >
-                      {Array.isArray(m.content?.imageUrls) &&
-                        m.content.imageUrls.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mb-2">
-                            {m.content.imageUrls.map((src, j) => (
-                              <img
-                                key={j}
-                                src={src}
-                                className="w-24 h-24 object-cover rounded-lg"
-                              />
-                            ))}
-                          </div>
-                        )}
-                      {typeof m.content === "string" ? m.content : m.content.text}
-                    </div>
-                  ))}
-              </div>
-
-              {/* composer */}
-              <div className="flex flex-col gap-2">
-                {/* image previews */}
-                {images.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {images.map((file, idx) => (
-                      <div key={idx} className="relative">
-                        <img
-                          src={URL.createObjectURL(file)}
-                          className="w-20 h-20 object-cover rounded-lg"
-                        />
-                        <button
-                          onClick={() => remove(idx)}
-                          className="absolute -top-2 -right-2 bg-black/60 text-white rounded-full w-5 h-5 text-xs"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex items-end gap-2">
+          <div className={`split-layout flex h-full transition-all duration-500 ${hasInteracted ? '' : 'items-center justify-center'}`}>
+            {!hasInteracted ? (
+              // Landing page style centered input
+              <div className="w-full max-w-2xl mx-auto p-4 text-center">
+                <h1 className="text-4xl font-bold text-indigo-600 mb-8">WildAI</h1>
+                <p className="text-xl text-gray-600 mb-8">Hardware Dev. Made Easy.</p>
+                <div className="flex flex-col gap-4 items-center">
                   <textarea
-                    rows="1"
+                    rows="3"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={onKey}
-                    placeholder='Lets build some hardware…'
-                    className="flex-1 resize-none border rounded-2xl p-3 shadow focus:outline-none"
+                    placeholder='Describe the hardware you want to build...'
+                    className="w-full resize-none border rounded-2xl p-4 shadow focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg"
                   ></textarea>
-
-                  <input
-                    id="imgInp"
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    hidden
-                    onChange={onFiles}
-                  />
-                  <label
-                    htmlFor="imgInp"
-                    className="cursor-pointer bg-gray-300 text-white px-4 py-2 rounded-2xl shadow"
-                  >
-                    📷
-                  </label>
-
-                  <button
-                    onClick={send}
-                    disabled={!input.trim() && images.length === 0}
-                    className="bg-indigo-500 text-white px-4 py-2 rounded-2xl shadow disabled:opacity-50"
-                  >
-                    Send
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Tabbed viewer */}
-            <div
-              className="diagram-pane w-full max-w-3xl p-4 overflow-auto bg-white shadow-inner border-l border-gray-300"
-            >
-              {/* tabs */}
-              <div className="flex gap-4 border-b mb-3">
-                {[
-                  ["schematic", "Schematic"],
-                  ["pcb", "PCB"],
-                  ["bom", "Components"],
-                  ["export", "Export"],
-                ].map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => setActiveTab(key)}
-                    className={
-                      "px-3 py-1 -mb-px border-b-2 " +
-                      (activeTab === key
-                        ? "border-indigo-600 font-semibold"
-                        : "border-transparent text-gray-500 hover:text-gray-800")
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {/* tab bodies */}
-              {activeTab === "schematic" &&
-                (schematic ? (
-                  <pre className="ascii-art whitespace-pre overflow-auto">
-                    {(() => {
-                      // Create a map of component references to their full search URLs
-                      const componentUrls = {};
-                      if (bom) {
-                        bom.split('\n').forEach(line => {
-                          const parts = line.trim().split(/\s+/);
-                          if (parts.length >= 2) {
-                            const ref = parts[0];
-                            const query = line.trim().replace(/\s+/g, '+');
-                            componentUrls[ref] = `https://www.amazon.com/s?k=${query}`;
-                          }
-                        });
-                      }
-
-                      return schematic.split('\n').map((line, i) => {
-                        // Find component references (e.g., R1, C1, IC1, etc.)
-                        const componentMatch = line.match(/\b([A-Z]+[0-9]+)\b/);
-                        if (componentMatch) {
-                          const ref = componentMatch[1];
-                          const url = componentUrls[ref] || `https://www.amazon.com/s?k=${ref}`;
-                          return (
-                            <div key={i}>
-                              {line.split(/\b([A-Z]+[0-9]+)\b/).map((part, j) => {
-                                if (j % 2 === 1) {
-                                  return (
-                                    <a
-                                      key={j}
-                                      href={url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-indigo-600 hover:underline"
-                                    >
-                                      {part}
-                                    </a>
-                                  );
-                                }
-                                return part;
-                              })}
-                            </div>
-                          );
-                        }
-                        return <div key={i}>{line}</div>;
-                      });
-                    })()}
-                  </pre>
-                ) : (
-                  <p className="text-gray-500 italic">No schematic yet.</p>
-                ))}
-
-              {activeTab === "pcb" &&
-                (pcb ? (
-                  <pre className="ascii-art whitespace-pre overflow-auto">
-                    {(() => {
-                      // Create a map of component references to their full search URLs
-                      const componentUrls = {};
-                      if (bom) {
-                        bom.split('\n').forEach(line => {
-                          const parts = line.trim().split(/\s+/);
-                          if (parts.length >= 2) {
-                            const ref = parts[0];
-                            const query = line.trim().replace(/\s+/g, '+');
-                            componentUrls[ref] = `https://www.amazon.com/s?k=${query}`;
-                          }
-                        });
-                      }
-
-                      return pcb.split('\n').map((line, i) => {
-                        // Find component references (e.g., R1, C1, IC1, etc.)
-                        const componentMatch = line.match(/\b([A-Z]+[0-9]+)\b/);
-                        if (componentMatch) {
-                          const ref = componentMatch[1];
-                          const url = componentUrls[ref] || `https://www.amazon.com/s?k=${ref}`;
-                          return (
-                            <div key={i}>
-                              {line.split(/\b([A-Z]+[0-9]+)\b/).map((part, j) => {
-                                if (j % 2 === 1) {
-                                  return (
-                                    <a
-                                      key={j}
-                                      href={url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-indigo-600 hover:underline"
-                                    >
-                                      {part}
-                                    </a>
-                                  );
-                                }
-                                return part;
-                              })}
-                            </div>
-                          );
-                        }
-                        return <div key={i}>{line}</div>;
-                      });
-                    })()}
-                  </pre>
-                ) : (
-                  <p className="text-gray-500 italic">No PCB layout yet.</p>
-                ))}
-
-              {activeTab === "bom" &&
-                (bom ? (
-                  <ul className="whitespace-pre font-mono space-y-1 overflow-auto">
-                    {bom
-                      .split(/\n/)
-                      .filter((l) => l.trim())
-                      .map((line, i) => {
-                        const query = line.trim().replace(/\s+/g, "+");
-                        return (
-                          <li key={i}>
-                            <a
-                              href={`https://www.amazon.com/s?k=${query}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-indigo-600 hover:underline"
-                            >
-                              {line}
-                            </a>
-                          </li>
-                        );
-                      })}
-                  </ul>
-                ) : (
-                  <p className="text-gray-500 italic">No component list yet.</p>
-                ))}
-
-              {activeTab === "export" && (
-                <div className="space-y-4">
+                  {/* Image previews for landing page */}
+                  {images.length > 0 && (
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      {images.map((file, idx) => (
+                        <div key={idx} className="relative">
+                          <img
+                            src={URL.createObjectURL(file)}
+                            className="w-32 h-32 object-cover rounded-lg shadow"
+                          />
+                          <button
+                            onClick={() => remove(idx)}
+                            className="absolute -top-2 -right-2 bg-black/60 text-white rounded-full w-6 h-6 text-sm hover:bg-black/80 transition-colors"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex gap-2">
-                    <select 
-                      id="languageSelect"
-                      className="border rounded-lg p-2"
-                      onChange={(e) => {
-                        const language = e.target.value;
-                        if (language) {
-                          const translatedContent = document.getElementById('translatedContent');
-                          translatedContent.innerText = 'Translating...';
-                          
-                          fetch('/api/translate', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              language,
-                              content: {
-                                schematic,
-                                pcb,
-                                bom
-                              }
-                            })
-                          })
-                          .then(response => {
-                            const reader = response.body.getReader();
-                            const decoder = new TextDecoder();
-                            let buffer = '';
-                            let fullTranslation = '';
-                            
-                            function processChunk({ done, value }) {
-                              if (done) return;
-                              
-                              buffer += decoder.decode(value, { stream: true });
-                              const lines = buffer.split('\n');
-                              buffer = lines.pop() || '';
-                              
-                              for (const line of lines) {
-                                if (line.startsWith('data: ')) {
-                                  const data = line.slice(6);
-                                  if (data === '[DONE]') return;
-                                  
-                                  try {
-                                    const parsed = JSON.parse(data);
-                                    if (parsed.response) {
-                                      fullTranslation += parsed.response;
-                                      translatedContent.innerText = fullTranslation;
-                                    }
-                                  } catch (e) {
-                                    console.error('Error parsing JSON:', e);
-                                  }
-                                }
-                              }
-                              
-                              return reader.read().then(processChunk);
-                            }
-                            
-                            return reader.read().then(processChunk);
-                          })
-                          .catch(err => {
-                            translatedContent.innerText = 'Error: ' + err.message;
-                          });
-                        }
-                      }}
+                    <input
+                      id="imgInp"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      hidden
+                      onChange={onFiles}
+                    />
+                    <label
+                      htmlFor="imgInp"
+                      className="cursor-pointer bg-gray-300 text-white px-6 py-3 rounded-2xl shadow hover:bg-gray-400 transition-colors"
                     >
-                      <option value="">Select language...</option>
-                      <option value="english">English</option>
-                      <option value="chinese">Chinese</option>
-                      <option value="vietnamese">Vietnamese</option>
-                    </select>
-                  </div>
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <pre id="translatedContent" className="whitespace-pre-wrap"></pre>
+                      📷 Upload Image
+                    </label>
+                    <button
+                      onClick={send}
+                      disabled={!input.trim() && images.length === 0}
+                      className="bg-indigo-500 text-white px-6 py-3 rounded-2xl shadow hover:bg-indigo-600 transition-colors disabled:opacity-50"
+                    >
+                      Start Building
+                    </button>
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              // Full interface after first interaction
+              <>
+                {/* Chat column */}
+                <div className="flex flex-col flex-1 max-w-2xl mx-auto p-4 gap-2">
+                  {/* chat list */}
+                  <div
+                    ref={listRef}
+                    className="flex-1 overflow-y-auto rounded-2xl p-4 space-y-4"
+                  >
+                    {messages
+                      .filter((m) => m.role !== "system")
+                      .map((m, i) => (
+                        <div
+                          key={i}
+                          className={
+                            "whitespace-pre-wrap rounded-2xl p-3 shadow overflow-x-auto overflow-y-auto " +
+                            (m.role === "user"
+                              ? "bg-indigo-600 text-white self-end"
+                              : "bg-white text-gray-900 self-start")
+                          }
+                        >
+                          {Array.isArray(m.content?.imageUrls) &&
+                            m.content.imageUrls.length > 0 && (
+                              <div className="flex flex-wrap gap-2 mb-2">
+                                {m.content.imageUrls.map((src, j) => (
+                                  <img
+                                    key={j}
+                                    src={src}
+                                    className="w-24 h-24 object-cover rounded-lg"
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          {typeof m.content === "string" ? m.content : m.content.text}
+                        </div>
+                      ))}
+                  </div>
+
+                  {/* composer */}
+                  <div className="flex flex-col gap-2">
+                    {/* image previews */}
+                    {images.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {images.map((file, idx) => (
+                          <div key={idx} className="relative">
+                            <img
+                              src={URL.createObjectURL(file)}
+                              className="w-20 h-20 object-cover rounded-lg"
+                            />
+                            <button
+                              onClick={() => remove(idx)}
+                              className="absolute -top-2 -right-2 bg-black/60 text-white rounded-full w-5 h-5 text-xs"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex items-end gap-2">
+                      <textarea
+                        rows="1"
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={onKey}
+                        placeholder='Lets build some hardware…'
+                        className="flex-1 resize-none border rounded-2xl p-3 shadow focus:outline-none"
+                      ></textarea>
+
+                      <input
+                        id="imgInp"
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        hidden
+                        onChange={onFiles}
+                      />
+                      <label
+                        htmlFor="imgInp"
+                        className="cursor-pointer bg-gray-300 text-white px-4 py-2 rounded-2xl shadow"
+                      >
+                        📷
+                      </label>
+
+                      <button
+                        onClick={send}
+                        disabled={!input.trim() && images.length === 0}
+                        className="bg-indigo-500 text-white px-4 py-2 rounded-2xl shadow disabled:opacity-50"
+                      >
+                        Send
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabbed viewer */}
+                <div
+                  className="diagram-pane w-full max-w-3xl p-4 overflow-auto bg-white shadow-inner border-l border-gray-300"
+                >
+                  {/* tabs */}
+                  <div className="flex gap-4 border-b mb-3">
+                    {[
+                      ["schematic", "Schematic"],
+                      ["pcb", "PCB"],
+                      ["bom", "Components"],
+                      ["export", "Export"],
+                    ].map(([key, label]) => (
+                      <button
+                        key={key}
+                        onClick={() => setActiveTab(key)}
+                        className={
+                          "px-3 py-1 -mb-px border-b-2 " +
+                          (activeTab === key
+                            ? "border-indigo-600 font-semibold"
+                            : "border-transparent text-gray-500 hover:text-gray-800")
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* tab bodies */}
+                  {activeTab === "schematic" &&
+                    (schematic ? (
+                      <pre className="ascii-art whitespace-pre overflow-auto">
+                        {(() => {
+                          // Create a map of component references to their full search URLs
+                          const componentUrls = {};
+                          if (bom) {
+                            bom.split('\n').forEach(line => {
+                              const parts = line.trim().split(/\s+/);
+                              if (parts.length >= 2) {
+                                const ref = parts[0];
+                                const query = line.trim().replace(/\s+/g, '+');
+                                componentUrls[ref] = `https://www.amazon.com/s?k=${query}`;
+                              }
+                            });
+                          }
+
+                          return schematic.split('\n').map((line, i) => {
+                            // Find component references (e.g., R1, C1, IC1, etc.)
+                            const componentMatch = line.match(/\b([A-Z]+[0-9]+)\b/);
+                            if (componentMatch) {
+                              const ref = componentMatch[1];
+                              const url = componentUrls[ref] || `https://www.amazon.com/s?k=${ref}`;
+                              return (
+                                <div key={i}>
+                                  {line.split(/\b([A-Z]+[0-9]+)\b/).map((part, j) => {
+                                    if (j % 2 === 1) {
+                                      return (
+                                        <a
+                                          key={j}
+                                          href={url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-indigo-600 hover:underline"
+                                        >
+                                          {part}
+                                        </a>
+                                      );
+                                    }
+                                    return part;
+                                  })}
+                                </div>
+                              );
+                            }
+                            return <div key={i}>{line}</div>;
+                          });
+                        })()}
+                      </pre>
+                    ) : (
+                      <p className="text-gray-500 italic">No schematic yet.</p>
+                    ))}
+
+                  {activeTab === "pcb" &&
+                    (pcb ? (
+                      <pre className="ascii-art whitespace-pre overflow-auto">
+                        {(() => {
+                          // Create a map of component references to their full search URLs
+                          const componentUrls = {};
+                          if (bom) {
+                            bom.split('\n').forEach(line => {
+                              const parts = line.trim().split(/\s+/);
+                              if (parts.length >= 2) {
+                                const ref = parts[0];
+                                const query = line.trim().replace(/\s+/g, '+');
+                                componentUrls[ref] = `https://www.amazon.com/s?k=${query}`;
+                              }
+                            });
+                          }
+
+                          return pcb.split('\n').map((line, i) => {
+                            // Find component references (e.g., R1, C1, IC1, etc.)
+                            const componentMatch = line.match(/\b([A-Z]+[0-9]+)\b/);
+                            if (componentMatch) {
+                              const ref = componentMatch[1];
+                              const url = componentUrls[ref] || `https://www.amazon.com/s?k=${ref}`;
+                              return (
+                                <div key={i}>
+                                  {line.split(/\b([A-Z]+[0-9]+)\b/).map((part, j) => {
+                                    if (j % 2 === 1) {
+                                      return (
+                                        <a
+                                          key={j}
+                                          href={url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-indigo-600 hover:underline"
+                                        >
+                                          {part}
+                                        </a>
+                                      );
+                                    }
+                                    return part;
+                                  })}
+                                </div>
+                              );
+                            }
+                            return <div key={i}>{line}</div>;
+                          });
+                        })()}
+                      </pre>
+                    ) : (
+                      <p className="text-gray-500 italic">No PCB layout yet.</p>
+                    ))}
+
+                  {activeTab === "bom" &&
+                    (bom ? (
+                      <ul className="whitespace-pre font-mono space-y-1 overflow-auto">
+                        {bom
+                          .split(/\n/)
+                          .filter((l) => l.trim())
+                          .map((line, i) => {
+                            const query = line.trim().replace(/\s+/g, "+");
+                            return (
+                              <li key={i}>
+                                <a
+                                  href={`https://www.amazon.com/s?k=${query}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-indigo-600 hover:underline"
+                                >
+                                  {line}
+                                </a>
+                              </li>
+                            );
+                          })}
+                      </ul>
+                    ) : (
+                      <p className="text-gray-500 italic">No component list yet.</p>
+                    ))}
+
+                  {activeTab === "export" && (
+                    <div className="space-y-4">
+                      <div className="flex gap-2">
+                        <select 
+                          id="languageSelect"
+                          className="border rounded-lg p-2"
+                          onChange={(e) => {
+                            const language = e.target.value;
+                            if (language) {
+                              const translatedContent = document.getElementById('translatedContent');
+                              translatedContent.innerText = 'Translating...';
+                              
+                              fetch('/api/translate', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  language,
+                                  content: {
+                                    schematic,
+                                    pcb,
+                                    bom
+                                  }
+                                })
+                              })
+                              .then(response => {
+                                const reader = response.body.getReader();
+                                const decoder = new TextDecoder();
+                                let buffer = '';
+                                let fullTranslation = '';
+                                
+                                function processChunk({ done, value }) {
+                                  if (done) return;
+                                  
+                                  buffer += decoder.decode(value, { stream: true });
+                                  const lines = buffer.split('\n');
+                                  buffer = lines.pop() || '';
+                                  
+                                  for (const line of lines) {
+                                    if (line.startsWith('data: ')) {
+                                      const data = line.slice(6);
+                                      if (data === '[DONE]') return;
+                                      
+                                      try {
+                                        const parsed = JSON.parse(data);
+                                        if (parsed.response) {
+                                          fullTranslation += parsed.response;
+                                          translatedContent.innerText = fullTranslation;
+                                        }
+                                      } catch (e) {
+                                        console.error('Error parsing JSON:', e);
+                                      }
+                                    }
+                                  }
+                                  
+                                  return reader.read().then(processChunk);
+                                }
+                                
+                                return reader.read().then(processChunk);
+                              })
+                              .catch(err => {
+                                translatedContent.innerText = 'Error: ' + err.message;
+                              });
+                            }
+                          }}
+                        >
+                          <option value="">Select language...</option>
+                          <option value="english">English</option>
+                          <option value="chinese">Chinese</option>
+                          <option value="vietnamese">Vietnamese</option>
+                        </select>
+                      </div>
+                      <div className="bg-gray-50 p-4 rounded-lg">
+                        <pre id="translatedContent" className="whitespace-pre-wrap"></pre>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         );
       }
