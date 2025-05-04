@@ -1,8 +1,9 @@
 <!DOCTYPE html>
+
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Cloudflare AI – Image‑to‑Circuit Chat (Tabbed Viewer)</title>
+    <title>Cloudflare AI – Image‑to‑Circuit Chat (Tabbed Viewer)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       @media (max-width: 900px) {
@@ -74,7 +75,7 @@
               role: "user",
               content: { text, imageUrls: images.map((f) => URL.createObjectURL(f)) },
             },
-            { role: "assistant", content: "…" },   // placeholder
+            { role: "assistant", content: "" },   // Empty placeholder for streaming
           ]);
           const placeholderIdx = messages.length + 1;
 
@@ -108,7 +109,16 @@
             const reader = res.body.getReader();
             const decoder = new TextDecoder("utf-8");
             let buffer = "", tail = "";
-
+            
+            // Track the active section being processed
+            let currentSection = "summary";
+            let summaryContent = "";
+            let schematicContent = "";
+            let pcbContent = "";
+            let bomContent = "";
+            let lastDetectedSection = null;
+            
+            // Process the incoming stream
             while (true) {
               const { value, done } = await reader.read();
               if (done) break;
@@ -122,45 +132,110 @@
                 const payload = line.slice(5).trim();
                 if (payload === "[DONE]") continue;
 
-                const obj = JSON.parse(payload);
-                if (typeof obj.response === "string") {
-                  buffer += obj.response;
+                try {
+                  const obj = JSON.parse(payload);
+                  if (typeof obj.response === "string") {
+                    // Add to buffer
+                    buffer += obj.response;
+                    
+                    // Check for section markers in the complete buffer
+                    const sections = buffer.split(/^\s*=+\s*(\w+)\s*=+\s*$/m);
+                    
+                    if (sections.length > 1) {
+                      // Process each section's content
+                      for (let i = 1; i < sections.length; i += 2) {
+                        const sectionName = sections[i].toLowerCase();
+                        const sectionContent = sections[i + 1]?.trim() || "";
+                        
+                        // Only process if this is new content for this section
+                        const isNewSection = lastDetectedSection !== sectionName;
+                        
+                        if (isNewSection) {
+                          lastDetectedSection = sectionName;
+                          
+                          // Update content and UI based on section type
+                          if (sectionName.startsWith("summary")) {
+                            summaryContent = sectionContent;
+                            setMessages(prev => {
+                              const copy = [...prev];
+                              copy[placeholderIdx] = {
+                                role: "assistant",
+                                content: summaryContent,
+                              };
+                              return copy;
+                            });
+                          } else if (sectionName.startsWith("schematic")) {
+                            schematicContent = sectionContent;
+                            setSchematic(schematicContent);
+                            setActiveTab("schematic");
+                          } else if (sectionName.startsWith("pcb") || sectionName.startsWith("board")) {
+                            pcbContent = sectionContent;
+                            setPcb(pcbContent);
+                            setActiveTab("pcb");
+                          } else if (sectionName.startsWith("bom") || sectionName.includes("list")) {
+                            bomContent = sectionContent;
+                            setBom(bomContent);
+                            setActiveTab("bom");
+                          }
+                        }
+                      }
+                    } else {
+                      // If we don't have sections yet, update the summary display
+                      setMessages(prev => {
+                        const copy = [...prev];
+                        copy[placeholderIdx] = {
+                          role: "assistant",
+                          content: buffer,
+                        };
+                        return copy;
+                      });
+                    }
+                  }
+                } catch (parseError) {
+                  console.error("Error parsing JSON:", parseError);
                 }
               }
             }
 
-            /* ── finished: peel the five blocks ── */
+            // Final processing when stream is complete
             const blocks = buffer.split(/^\s*=+\s*(\w+)\s*=+\s*$/m);
-            let summary = "", schem = "", board = "", list = "";
-
+            
+            // Ensure the final content is correctly set
             if (blocks.length > 1) {
               for (let i = 1; i < blocks.length; i += 2) {
-                const label = blocks[i].toLowerCase();
-                const payload = blocks[i + 1].trim();
-                if (label.startsWith("summary")) summary = payload;
-                else if (label.startsWith("schematic")) schem = payload;
-                else if (label.startsWith("pcb") || label.startsWith("board")) board = payload;
-                else if (label.startsWith("bom") || label.includes("list")) list = payload;
+                const label = blocks[i]?.toLowerCase() || "";
+                const payload = blocks[i + 1]?.trim() || "";
+                
+                if (label.startsWith("summary")) {
+                  setMessages(prev => {
+                    const copy = [...prev];
+                    copy[placeholderIdx] = {
+                      role: "assistant",
+                      content: payload,
+                    };
+                    return copy;
+                  });
+                } else if (label.startsWith("schematic")) {
+                  setSchematic(payload);
+                } else if (label.startsWith("pcb") || label.startsWith("board")) {
+                  setPcb(payload);
+                } else if (label.startsWith("bom") || label.includes("list")) {
+                  setBom(payload);
+                }
               }
-            } else {
-              /* fallback for old replies */
-              schem = buffer;
+            } else if (buffer.trim()) {
+              // No sections found, use entire buffer as content
+              setMessages(prev => {
+                const copy = [...prev];
+                copy[placeholderIdx] = {
+                  role: "assistant",
+                  content: buffer,
+                };
+                return copy;
+              });
             }
-
-            /* update chat bubble with SUMMARY (or whole buffer if absent) */
-            setMessages(prev => {
-              const copy = [...prev];
-              copy[placeholderIdx] = {
-                role: "assistant",
-                content: summary || buffer || "(empty)",
-              };
-              return copy;
-            });
-
-            /* feed viewer tabs */
-            if (schem) setSchematic(schem);
-            if (board) setPcb(board);
-            if (list) setBom(list);
+            
+            // Return to schematic tab when finished
             setActiveTab("schematic");
           } catch (err) {
             setMessages((prev) => [
@@ -292,7 +367,7 @@
                   </button>
                 </div>
                 <p className="text-xs text-gray-500 pl-1">
-                  Tip: Drop a photo of your timer (or any gadget) and hit “Send” – the
+                  Tip: Drop a photo of your timer (or any gadget) and hit "Send" – the
                   AI will reverse‑engineer its circuit.
                 </p>
               </div>
@@ -341,7 +416,26 @@
 
               {activeTab === "bom" &&
                 (bom ? (
-                  <pre className="whitespace-pre overflow-auto">{bom}</pre>
+                  <ul className="whitespace-pre font-mono space-y-1 overflow-auto">
+                    {bom
+                      .split(/\n/)
+                      .filter((l) => l.trim())
+                      .map((line, i) => {
+                        const query = line.trim().replace(/\s+/g, "+");
+                        return (
+                          <li key={i}>
+                            <a
+                              href={`https://www.amazon.com/s?k=${query}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-indigo-600 hover:underline"
+                            >
+                              {line}
+                            </a>
+                          </li>
+                        );
+                      })}
+                  </ul>
                 ) : (
                   <p className="text-gray-500 italic">No component list yet.</p>
                 ))}
