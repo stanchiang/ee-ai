@@ -1,31 +1,174 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Hello, World!</title>
-	</head>
-	<body>
-		<h1 id="heading"></h1>
-		<button id="button" type="button">Fetch a random UUID</button>
-		<output id="random" for="button"></output>
-		<script>
-			fetch('/message')
-				.then((resp) => resp.text())
-				.then((text) => {
-					const h1 = document.getElementById('heading');
-					h1.textContent = text;
-				});
+  <head>
+    <meta charset="utf-8" />
+    <title>Cloudflare AI Chat</title>
 
-			const button = document.getElementById("button");
-			button.addEventListener("click", () => {
-				fetch('/random')
-					.then((resp) => resp.text())
-					.then((text) => {
-						const random = document.getElementById('random');
-						random.textContent = text;
-					});
-			});
-		</script>
-	</body>
+    <!-- Tailwind for quick styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+
+  <body class="bg-gray-100">
+    <!-- Mount point -->
+    <div id="root" class="h-screen"></div>
+
+    <!-- React + React‑DOM (development builds) -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+    <!-- Babel so we can write JSX right here -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- ChatApp component -->
+    <script type="text/babel">
+      const { useState, useRef, useEffect } = React;
+
+      function ChatApp() {
+        const [messages, setMessages] = useState([
+          { role: "system", content: "You are a friendly assistant" },
+        ]);
+        const [input, setInput] = useState("");
+        const controllerRef = useRef(null);
+        const listRef = useRef(null);
+
+        // auto‑scroll on every new message
+        useEffect(() => {
+          listRef.current?.scrollTo({
+            top: listRef.current.scrollHeight,
+            behavior: "smooth",
+          });
+        }, [messages]);
+
+        async function sendMessage() {
+          const content = input.trim();
+          if (!content) return;
+
+          const userMsg = { role: "user", content };
+          const convo = [...messages, userMsg];
+
+          // placeholder assistant so UI shows a streaming bubble
+          setMessages([...convo, { role: "assistant", content: "" }]);
+          setInput("");
+          controllerRef.current = new AbortController();
+
+          try {
+            const res = await fetch("/api/chat", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ messages: convo }),
+              signal: controllerRef.current.signal,
+            });
+            if (!res.ok || !res.body) throw new Error(res.statusText);
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = ""; // shown to the user
+            let tail = "";   // stores partial line between reads
+
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+
+              tail += decoder.decode(value, { stream: true });
+              const lines = tail.split(/\r?\n/);
+              tail = lines.pop() ?? ""; // last element might be incomplete
+
+              for (const line of lines) {
+                if (!line.startsWith("data:")) continue;
+                const payload = line.slice(5).trim();
+                if (payload === "[DONE]") break;
+
+                try {
+                  const obj = JSON.parse(payload);
+                  if (typeof obj.response === "string") {
+                    buffer += obj.response;
+                    setMessages((prev) => {
+                      const copy = [...prev];
+                      copy[copy.length - 1] = {
+                        role: "assistant",
+                        content: buffer,
+                      };
+                      return copy;
+                    });
+                  }
+                } catch {
+                  // ignore — we’ll get the rest of the JSON next chunk
+                }
+              }
+            }
+          } catch (err) {
+            setMessages((prev) => [
+              ...prev.slice(0, -1),
+              { role: "assistant", content: "Error: " + err.message },
+            ]);
+          }
+        }
+
+        function onKey(e) {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+          }
+        }
+
+        function stop() {
+          controllerRef.current?.abort();
+        }
+
+        return (
+          <div className="flex flex-col h-full max-w-2xl mx-auto p-4 gap-2">
+            <div
+              ref={listRef}
+              className="flex-1 overflow-y-auto bg-gray-50 rounded-2xl p-4 shadow-inner space-y-4"
+            >
+              {messages
+                .filter((m) => m.role !== "system")
+                .map((m, i) => (
+                  <div
+                    key={i}
+                    className={
+                      "whitespace-pre-wrap rounded-2xl p-3 shadow " +
+                      (m.role === "user"
+                        ? "bg-blue-500 text-white self-end"
+                        : "bg-white text-gray-900 self-start")
+                    }
+                  >
+                    {m.content}
+                  </div>
+                ))}
+            </div>
+
+            <div className="flex gap-2">
+              <textarea
+                rows="1"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={onKey}
+                placeholder="Type a message…"
+                className="flex-1 resize-none border rounded-2xl p-3 shadow focus:outline-none"
+              ></textarea>
+
+              <button
+                onClick={sendMessage}
+                disabled={!input.trim()}
+                className="bg-green-500 text-white px-4 py-2 rounded-2xl shadow disabled:opacity-50"
+              >
+                Send
+              </button>
+
+              <button
+                onClick={stop}
+                className="bg-red-500 text-white px-4 py-2 rounded-2xl shadow"
+              >
+                Stop
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      // Mount
+      ReactDOM.createRoot(document.getElementById("root")).render(<ChatApp />);
+    </script>
+  </body>
 </html>
