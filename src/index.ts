@@ -1,12 +1,11 @@
 /*  Cloudflare Worker – Image‑to‑Circuit Chat
-    Emits three ASCII blocks (schematic, PCB, BOM) delimited by === MARKERS ===
+    Emits five ASCII‑only blocks:
+      SUMMARY · SCHEMATIC · PCB · BOM
+    (retains all original ASCII‑diagram constraints)
 */
-
 import type { Ai } from "@cloudflare/ai";
 
-export interface Env {
-  AI: Ai;
-}
+export interface Env { AI: Ai }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -17,7 +16,7 @@ export default {
     /* ────── request body ────── */
     const { history, images = [], text } = (await request.json()) as {
       history: { role: string; content: string }[];
-      images?: string[]; // data‑URLs
+      images?: string[];
       text: string;
     };
 
@@ -34,21 +33,28 @@ export default {
           content: [
             "You are a helpful electrical engineer.",
             "",
-            "⚠️ ALWAYS reply with ASCII art **only** – no prose, no code fences.",
+            "⚠️ If the request is vague, always make simple, sensible assumptions.",
+            "⚠️ Treat the entire conversation as a single ongoing design session. Extend from the last circuit you produced instead of starting from scratch.",
             "",
-            "✂️ **Output format (MANDATORY)**",
+            "⚙️ **OUTPUT FORMAT (MANDATORY)** – reply with these five ASCII‑only blocks *in order*:",
+            "=== SUMMARY ===",
+            "(concise natural‑language explanation, ≤ 10 lines)",
             "=== SCHEMATIC ===",
-            "(ASCII circuit diagram with labelled parts)",
+            "(ASCII circuit diagram of a complete, functional electronic circuit)",
             "=== PCB ===",
             "(ASCII representation of the PCB layout)",
             "=== BOM ===",
-            "(plain ASCII list of components, one per line: Ref  Value  Part‑type)",
+            "(plain ASCII list:  Ref   Value   Part‑type)",
             "",
-            "Keep lines under 120 chars, use spaces/ASCII box‑drawing as needed.",
-            "If you must refuse, reply with exactly: ERROR",
+            "Inside *SCHEMATIC* (and PCB):",
+            " • Use only printable ASCII – no code fences, no HTML.",
+            " • Label every component with its type and value (e.g., R1 1 kΩ, C1 10 µF, 555 Timer).",
+            " • Show connections with lines; box or nest multi‑pin ICs when appropriate.",
+            " • Use standard components (resistors, capacitors, ICs, transistors, diodes, etc.).",
             "",
-            "📷 **Image handling rule**: if the user supplies an image, assume it shows",
-            "the device to clone; design a circuit that replicates its main function.",
+            "Absolutely NOTHING outside the five blocks.  If you must refuse, output exactly: ERROR",
+            "",
+            "📷 Image rule: if the user supplies a photo, assume it shows the target device and design a circuit that reproduces its main function.",
           ].join("\n"),
         },
       ];
@@ -58,69 +64,62 @@ export default {
         { messages, stream: true, max_tokens: 9999, seed: 1 }
       );
       const reader = aiStream.getReader();
-      const encoder = new TextEncoder();
-      const decoder = new TextDecoder("utf-8");
+      const enc = new TextEncoder();
+      const dec = new TextDecoder("utf-8");
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
-        /* each chunk looks like:  data: {"response":"..."}\n\n */
-        const chunkStr = decoder.decode(value, { stream: false });
-        const match = chunkStr.match(/^data:\s*(\{.*\})/);
-        if (!match) {
-          // Unexpected line – passthrough
+        /* incoming chunk:  data: {"response":"..."}\n\n  */
+        const str = dec.decode(value, { stream: false });
+        const m = str.match(/^data:\s*(\{.*})/);
+        if (!m) {              // passthrough anything unexpected
           ctrl.enqueue(value);
           continue;
         }
+        const obj = JSON.parse(m[1]);
 
-        const obj = JSON.parse(match[1]);
-
-        /* 🧹 sanitise ONLY the model text (strip any accidental code‑fences) */
+        /* strip any accidental ``` fenced blocks */
         obj.response = obj.response.replace(/```[\s\S]*?```/g, "");
 
-        const cleanLine = "data: " + JSON.stringify(obj) + "\n\n";
-        ctrl.enqueue(encoder.encode(cleanLine));
+        ctrl.enqueue(enc.encode("data: " + JSON.stringify(obj) + "\n\n"));
       }
     };
 
-    /* ────── combined SSE stream ────── */
+    /* ────── combined SSE response ────── */
     const stream = new ReadableStream({
       start: async (ctrl) => {
-        /* 1️⃣ image‑plus‑text turns (one per picture) */
+        /* image turns (one per image) */
         for (const url of images) {
           const safeText =
             text.trim() ||
-            "Design a schematic / PCB / BOM for this device (ASCII blocks only)";
+            "Design schematic / PCB / BOM for this device.";
           await streamOne(
             [
               { type: "image_url", image_url: { url } },
-              { type: "text", text: safeText },
+              { type: "text", text: safeText }
             ],
             ctrl
           );
-          // visual pause so the client can separate images
-          ctrl.enqueue(
-            new TextEncoder().encode('data: {"response":"\\n"}\n\n')
-          );
+          ctrl.enqueue(new TextEncoder().encode('data: {"response":"\\n"}\n\n'));
         }
 
-        /* 2️⃣ pure text turn if there were no images */
+        /* pure‑text turn (if no images) */
         if (images.length === 0) {
           await streamOne([{ type: "text", text }], ctrl);
         }
 
-        /* done */
         ctrl.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
         ctrl.close();
-      },
+      }
     });
 
     return new Response(stream, {
       headers: {
         "content-type": "text/event-stream",
-        "access-control-allow-origin": "*", // dev CORS
-      },
+        "access-control-allow-origin": "*"
+      }
     });
-  },
+  }
 } satisfies ExportedHandler<Env>;
