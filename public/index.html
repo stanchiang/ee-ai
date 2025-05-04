@@ -566,6 +566,9 @@
                       onChange={(e) => {
                         const language = e.target.value;
                         if (language) {
+                          const translatedContent = document.getElementById('translatedContent');
+                          translatedContent.innerText = 'Translating...';
+                          
                           fetch('/api/translate', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -578,12 +581,43 @@
                               }
                             })
                           })
-                          .then(res => res.json())
-                          .then(data => {
-                            document.getElementById('translatedContent').innerText = data.translation;
+                          .then(response => {
+                            const reader = response.body.getReader();
+                            const decoder = new TextDecoder();
+                            let buffer = '';
+                            let fullTranslation = '';
+                            
+                            function processChunk({ done, value }) {
+                              if (done) return;
+                              
+                              buffer += decoder.decode(value, { stream: true });
+                              const lines = buffer.split('\n');
+                              buffer = lines.pop() || '';
+                              
+                              for (const line of lines) {
+                                if (line.startsWith('data: ')) {
+                                  const data = line.slice(6);
+                                  if (data === '[DONE]') return;
+                                  
+                                  try {
+                                    const parsed = JSON.parse(data);
+                                    if (parsed.response) {
+                                      fullTranslation += parsed.response;
+                                      translatedContent.innerText = fullTranslation;
+                                    }
+                                  } catch (e) {
+                                    console.error('Error parsing JSON:', e);
+                                  }
+                                }
+                              }
+                              
+                              return reader.read().then(processChunk);
+                            }
+                            
+                            return reader.read().then(processChunk);
                           })
                           .catch(err => {
-                            document.getElementById('translatedContent').innerText = 'Error: ' + err.message;
+                            translatedContent.innerText = 'Error: ' + err.message;
                           });
                         }
                       }}

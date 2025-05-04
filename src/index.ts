@@ -13,7 +13,7 @@ export default {
       const url = new URL(request.url);
       
       if (url.pathname === "/api/translate") {
-        const { language, content } = await request.json();
+        const { language, content } = await request.json() as { language: string; content: { schematic: string; pcb: string; bom: string } };
         
         const messages = [
           {
@@ -21,11 +21,14 @@ export default {
             content: `You are a technical translator. Translate the following circuit specification into ${language}. 
             Maintain the technical accuracy while making it natural in the target language.
             Format the output as a clear technical document with sections for Schematic, PCB, and BOM.
-            Use appropriate technical terminology in the target language.`
+            Use appropriate technical terminology in the target language.
+            
+            IMPORTANT: Only output the translation. Do not include any introductory text, explanations, or closing remarks.
+            The output should start directly with the translated content.`
           },
           {
             role: "user",
-            content: `Please translate this circuit specification:
+            content: `Translate this circuit specification:
 
 Schematic:
 ${content.schematic}
@@ -38,13 +41,40 @@ ${content.bom}`
           }
         ];
 
-        const aiResponse = await env.AI.run(
+        const aiStream = await env.AI.run(
           "@cf/meta/llama-4-scout-17b-16e-instruct",
-          { messages, stream: false, max_tokens: 9999 }
+          { messages, stream: true, max_tokens: 9999 }
         );
 
-        return new Response(JSON.stringify({ translation: aiResponse.response }), {
-          headers: { "Content-Type": "application/json" }
+        const stream = new ReadableStream({
+          async start(controller) {
+            const reader = aiStream.getReader();
+            const encoder = new TextEncoder();
+            
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) {
+                controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+                controller.close();
+                break;
+              }
+              
+              const str = new TextDecoder().decode(value);
+              const m = str.match(/^data:\s*(\{.*})/);
+              if (m) {
+                const obj = JSON.parse(m[1]);
+                controller.enqueue(encoder.encode('data: ' + JSON.stringify(obj) + '\n\n'));
+              }
+            }
+          }
+        });
+
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive'
+          }
         });
       }
 
