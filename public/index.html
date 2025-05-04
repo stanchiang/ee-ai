@@ -409,6 +409,7 @@
                   ["schematic", "Schematic"],
                   ["pcb", "PCB"],
                   ["bom", "Components"],
+                  ["export", "Export"],
                 ].map(([key, label]) => (
                   <button
                     key={key}
@@ -555,6 +556,49 @@
                 ) : (
                   <p className="text-gray-500 italic">No component list yet.</p>
                 ))}
+
+              {activeTab === "export" && (
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    <select 
+                      id="languageSelect"
+                      className="border rounded-lg p-2"
+                      onChange={(e) => {
+                        const language = e.target.value;
+                        if (language) {
+                          fetch('/api/translate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              language,
+                              content: {
+                                schematic,
+                                pcb,
+                                bom
+                              }
+                            })
+                          })
+                          .then(res => res.json())
+                          .then(data => {
+                            document.getElementById('translatedContent').innerText = data.translation;
+                          })
+                          .catch(err => {
+                            document.getElementById('translatedContent').innerText = 'Error: ' + err.message;
+                          });
+                        }
+                      }}
+                    >
+                      <option value="">Select language...</option>
+                      <option value="english">English</option>
+                      <option value="chinese">Chinese</option>
+                      <option value="vietnamese">Vietnamese</option>
+                    </select>
+                  </div>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <pre id="translatedContent" className="whitespace-pre-wrap"></pre>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         );
