@@ -3,7 +3,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Cloudflare AI – Image‑to‑Circuit Chat (Tabbed Viewer)</title>
+    <title>WildAI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       @media (max-width: 900px) {
@@ -27,8 +27,23 @@
     </style>
   </head>
 
-  <body class="bg-gray-100">
-    <div id="root" class="h-screen"></div>
+  <body class="bg-gray-100 flex flex-col h-screen">
+    <!-- Navigation Bar -->
+    <nav class="bg-white shadow-md flex-shrink-0">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between h-16">
+          <div class="flex items-center">
+            <div class="flex-shrink-0 flex items-center">
+              <span class="text-2xl font-bold text-indigo-600">WildAI</span>
+              <span class="ml-2 text-gray-600">Hardware Dev. Made Easy.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div id="root" class="flex-1 overflow-hidden"></div>
 
     <!-- React libs -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -65,6 +80,7 @@
         const [pcb, setPcb] = useState("");
         const [bom, setBom] = useState("");
         const [activeTab, setActiveTab] = useState("schematic");
+        const [lastDiagramUpdate, setLastDiagramUpdate] = useState(Date.now());
 
         const listRef = useRef(null);
         const controllerRef = useRef(null);
@@ -81,6 +97,11 @@
         async function send() {
           const text = input.trim();
           if (!text && images.length === 0) return;
+
+          // Check if this is a question about the existing design
+          const isQuestion = /^(what|how|why|explain|describe|tell me about|can you explain|what is|what are|how does|why does)/i.test(text);
+          const isModificationRequest = /^(modify|change|update|redesign|create|make|build|design|add|remove|replace)/i.test(text);
+          const shouldUpdateDiagram = !isQuestion && (isModificationRequest || images.length > 0);
 
           /* echo user */
           setMessages((prev) => [
@@ -204,18 +225,21 @@
                               };
                               return copy;
                             });
-                          } else if (sectionName.startsWith("schematic")) {
-                            schematicContent = cleanContent;
-                            setSchematic(schematicContent);
-                            setActiveTab("schematic");
-                          } else if (sectionName.startsWith("pcb") || sectionName.startsWith("board")) {
-                            pcbContent = cleanContent;
-                            setPcb(pcbContent);
-                            setActiveTab("pcb");
-                          } else if (sectionName.startsWith("bom") || sectionName.includes("list")) {
-                            bomContent = cleanContent;
-                            setBom(bomContent);
-                            setActiveTab("bom");
+                          } else if (shouldUpdateDiagram) {
+                            // Only update diagram sections if we should update the diagram
+                            if (sectionName.startsWith("schematic")) {
+                              schematicContent = cleanContent;
+                              setSchematic(schematicContent);
+                              setActiveTab("schematic");
+                            } else if (sectionName.startsWith("pcb") || sectionName.startsWith("board")) {
+                              pcbContent = cleanContent;
+                              setPcb(pcbContent);
+                              setActiveTab("pcb");
+                            } else if (sectionName.startsWith("bom") || sectionName.includes("list")) {
+                              bomContent = cleanContent;
+                              setBom(bomContent);
+                              setActiveTab("bom");
+                            }
                           }
                         }
                       }
@@ -258,12 +282,15 @@
                     };
                     return copy;
                   });
-                } else if (label.startsWith("schematic")) {
-                  setSchematic(cleanPayload);
-                } else if (label.startsWith("pcb") || label.startsWith("board")) {
-                  setPcb(cleanPayload);
-                } else if (label.startsWith("bom") || label.includes("list")) {
-                  setBom(cleanPayload);
+                } else if (shouldUpdateDiagram) {
+                  // Only update diagram sections if we should update the diagram
+                  if (label.startsWith("schematic")) {
+                    setSchematic(cleanPayload);
+                  } else if (label.startsWith("pcb") || label.startsWith("board")) {
+                    setPcb(cleanPayload);
+                  } else if (label.startsWith("bom") || label.includes("list")) {
+                    setBom(cleanPayload);
+                  }
                 }
               }
             } else if (buffer.trim()) {
@@ -277,6 +304,11 @@
                 };
                 return copy;
               });
+            }
+            
+            // Only update last diagram update timestamp if we actually updated the diagram
+            if (shouldUpdateDiagram) {
+              setLastDiagramUpdate(Date.now());
             }
             
             // Return to schematic tab when finished
@@ -310,7 +342,7 @@
               {/* chat list */}
               <div
                 ref={listRef}
-                className="flex-1 overflow-y-auto bg-gray-50 rounded-2xl p-4 shadow-inner space-y-4"
+                className="flex-1 overflow-y-auto rounded-2xl p-4 space-y-4"
               >
                 {messages
                   .filter((m) => m.role !== "system")
@@ -320,7 +352,7 @@
                       className={
                         "whitespace-pre-wrap rounded-2xl p-3 shadow overflow-x-auto overflow-y-auto " +
                         (m.role === "user"
-                          ? "bg-blue-500 text-white self-end"
+                          ? "bg-indigo-600 text-white self-end"
                           : "bg-white text-gray-900 self-start")
                       }
                     >
@@ -383,7 +415,7 @@
                   />
                   <label
                     htmlFor="imgInp"
-                    className="cursor-pointer bg-indigo-500 text-white px-4 py-2 rounded-2xl shadow"
+                    className="cursor-pointer bg-gray-300 text-white px-4 py-2 rounded-2xl shadow"
                   >
                     📷
                   </label>
@@ -391,7 +423,7 @@
                   <button
                     onClick={send}
                     disabled={!input.trim() && images.length === 0}
-                    className="bg-green-500 text-white px-4 py-2 rounded-2xl shadow disabled:opacity-50"
+                    className="bg-indigo-500 text-white px-4 py-2 rounded-2xl shadow disabled:opacity-50"
                   >
                     Send
                   </button>

@@ -98,13 +98,13 @@ ${content.bom}`
             content: [
               "You are a helpful electrical engineer.",
               "",
-              "⚠️ If the request is vague, always make simple, sensible assumptions.",
+              "⚠️ Always make realistic, sensible assumptions.",
               "",
               "⚙️ **OUTPUT FORMAT (MANDATORY)** – reply with these five ASCII‑only blocks *in order*:",
               "=== SUMMARY ===",
               "(concise natural‑language explanation, ≤ 10 lines)",
               "=== SCHEMATIC ===",
-              "(ASCII circuit diagram of a complete, functional electronic circuit)",
+              "(ASCII circuit diagram of a complete, functional electronic circuit with arrows)",
               "=== PCB ===",
               "(ASCII representation of the PCB layout)",
               "=== BOM ===",
@@ -116,7 +116,11 @@ ${content.bom}`
               " • Show connections with lines; box or nest multi‑pin ICs when appropriate.",
               " • Use standard components (resistors, capacitors, ICs, transistors, diodes, etc.).",
               "",
-              "Absolutely NOTHING outside the five blocks.  If you must refuse, output exactly: ERROR",
+              "IMPORTANT RULES:",
+              "1. If the user asks a question about the existing design (e.g., 'What does R1 do?', 'How does this circuit work?', 'Explain this component'),",
+              "   ONLY output the SUMMARY section with your answer. Do NOT redraw the schematic, PCB, or BOM.",
+              "2. If the user wants to modify or create a new design, output all five blocks as usual.",
+              "3. If you must refuse, output exactly: ERROR",
               "",
               "📷 Image rule: if the user supplies a photo, assume it shows the target device and design a circuit that reproduces its main function.",
             ].join("\n"),
@@ -125,7 +129,7 @@ ${content.bom}`
 
         const aiStream = await env.AI.run(
           "@cf/meta/llama-4-scout-17b-16e-instruct",
-          { messages, stream: true, max_tokens: 9999, seed: 1 }
+          { messages, stream: true, max_tokens: 9999, seed: 1}
         );
         const reader = aiStream.getReader();
         const enc = new TextEncoder();
