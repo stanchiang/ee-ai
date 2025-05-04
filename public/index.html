@@ -2,100 +2,97 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Cloudflare AI – Multimodal Chat</title>
-
-    <!-- Tailwind for quick styling -->
+    <title>Cloudflare AI – Multi‑image Chat</title>
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
 
   <body class="bg-gray-100">
     <div id="root" class="h-screen"></div>
 
-    <!-- React + React‑DOM (dev builds) -->
+    <!-- React + React‑DOM -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-
-    <!-- Babel so we can write JSX right here -->
+    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <script type="text/babel">
       const { useState, useRef, useEffect } = React;
+      const readAsDataURL = f =>
+        new Promise((r, x) => {
+          const fr = new FileReader();
+          fr.onload  = () => r(fr.result);
+          fr.onerror = x;
+          fr.readAsDataURL(f);
+        });
 
       function ChatApp() {
-        const [messages, setMessages]   = useState([
+        const [messages, setMessages] = useState([
           { role: "system", content: "You are a friendly assistant" },
         ]);
-        const [input, setInput]         = useState("");
-        const [imageFile, setImageFile] = useState(null);   // <-- NEW
-        const controllerRef             = useRef(null);
-        const listRef                   = useRef(null);
+        const [input, setInput]   = useState("");
+        const [images, setImages] = useState([]); // File[]
+        const listRef             = useRef(null);
+        const controllerRef       = useRef(null);
 
-        /* auto‑scroll on every new message */
+        /* auto‑scroll */
         useEffect(() => {
           listRef.current?.scrollTo({
-            top:      listRef.current.scrollHeight,
+            top: listRef.current.scrollHeight,
             behavior: "smooth",
           });
         }, [messages]);
 
-        /* helper – read File → data URL */
-        function readAsDataURL(file) {
-          return new Promise((res, rej) => {
-            const fr = new FileReader();
-            fr.onload  = () => res(fr.result);
-            fr.onerror = rej;
-            fr.readAsDataURL(file);
-          });
-        }
-
-        async function sendMessage() {
+        /* ---------- send ---------- */
+        async function send() {
           const text = input.trim();
-          if (!text && !imageFile) return;   // nothing to send
+          if (!text && images.length === 0) return;
 
-          const userBubble = {
-            role: "user",
-            content: { text, image: imageFile ? URL.createObjectURL(imageFile) : null },
-          };
-
-          /* For UI we keep a simple object; for the Worker we’ll build the
-             proper messages + image separately. */
-          setMessages((prev) => [...prev, userBubble, { role: "assistant", content: "" }]);
+          /* local UI echo */
+          setMessages(prev => [
+            ...prev,
+            {
+              role: "user",
+              content: {
+                text,
+                imageUrls: images.map(f => URL.createObjectURL(f)),
+              },
+            },
+            { role: "assistant", content: "" },
+          ]);
+          const imgs = images;
           setInput("");
-          setImageFile(null);
+          setImages([]);
+
           controllerRef.current = new AbortController();
 
-          /* ---- Build request body ---- */
-          const convo = messages
-            .filter((m) => m.role !== "system")  // omit system prompt already at top
-            .map((m) => {
-              if (m.role !== "user") return m;   // assistant messages stay the same
-              /* unwrap our UI helper object */
-              if (typeof m.content === "string") {
-                return { role: "user", content: m.content };
-              }
-              return { role: "user", content: m.content.text };
-            });
-          convo.push({ role: "user", content: text });      // add current message
-
-          const body = { messages: convo };
-
-          if (imageFile) {
-            body.image = await readAsDataURL(imageFile);    // base64 data URL
-          }
+          /* payload */
+          const body = {
+            text,
+            images: await Promise.all(imgs.map(readAsDataURL)),
+            history: messages
+              .filter(m => m.role !== "system")
+              .map(m =>
+                typeof m.content === "string"
+                  ? m
+                  : { role: m.role, content: m.content.text }
+              ),
+          };
 
           try {
             const res = await fetch("/api/chat", {
-              method:  "POST",
+              method: "POST",
               headers: { "Content-Type": "application/json" },
-              body:    JSON.stringify(body),
-              signal:  controllerRef.current.signal,
+              body: JSON.stringify(body),
+              signal: controllerRef.current.signal,
             });
-            if (!res.ok || !res.body) throw new Error(res.statusText);
+            if (!res.ok || !res.body)
+              throw new Error(`HTTP ${res.status} – ${await res.text()}`);
 
+            /* ---- stream reader ---- */
             const reader  = res.body.getReader();
             const decoder = new TextDecoder("utf-8");
-            let buffer    = "";
-            let tail      = "";
+            let buffer = "";
+            let tail   = "";
 
             while (true) {
               const { value, done } = await reader.read();
@@ -103,7 +100,7 @@
 
               tail += decoder.decode(value, { stream: true });
               const lines = tail.split(/\r?\n/);
-              tail        = lines.pop() ?? "";            // hold incomplete
+              tail = lines.pop() ?? "";
 
               for (const line of lines) {
                 if (!line.startsWith("data:")) continue;
@@ -114,105 +111,134 @@
                   const obj = JSON.parse(payload);
                   if (typeof obj.response === "string") {
                     buffer += obj.response;
-                    setMessages((prev) => {
+                    setMessages(prev => {
                       const copy = [...prev];
-                      copy[copy.length - 1] = { role: "assistant", content: buffer };
+                      copy[copy.length - 1] = {
+                        role: "assistant",
+                        content: buffer,
+                      };
                       return copy;
                     });
                   }
                 } catch {
-                  /* wait for the rest of the JSON in the next chunk */
+                  /* wait for more */
                 }
               }
             }
           } catch (err) {
-            setMessages((prev) => [
+            setMessages(prev => [
               ...prev.slice(0, -1),
               { role: "assistant", content: "Error: " + err.message },
             ]);
           }
         }
 
-        function onKey(e) {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-          }
-        }
+        /* helpers */
+        const onKey    = e => { if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); send(); } };
+        const stop     = () => controllerRef.current?.abort();
+        const onFiles  = e => setImages(prev => [...prev, ...Array.from(e.target.files ?? [])]);
+        const remove   = i => setImages(prev => prev.filter((_,idx) => idx!==i));
 
-        function stop() {
-          controllerRef.current?.abort();
-        }
-
+        /* ---------- UI ---------- */
         return (
           <div className="flex flex-col h-full max-w-2xl mx-auto p-4 gap-2">
+            {/* chat list */}
             <div
               ref={listRef}
               className="flex-1 overflow-y-auto bg-gray-50 rounded-2xl p-4 shadow-inner space-y-4"
             >
-              {messages
-                .filter((m) => m.role !== "system")
-                .map((m, i) => (
-                  <div
-                    key={i}
-                    className={
-                      "max-w-[70%] whitespace-pre-wrap rounded-2xl p-3 shadow " +
-                      (m.role === "user"
-                        ? "bg-blue-500 text-white self-end"
-                        : "bg-white text-gray-900 self-start")
-                    }
-                  >
-                    {/* show image if present (only for user bubbles) */}
-                    {m.content?.image && (
-                      <img
-                        src={m.content.image}
-                        alt="uploaded"
-                        className="mb-2 rounded-lg max-h-48 object-contain"
-                      />
+              {messages.filter(m => m.role !== "system").map((m, i) => (
+                <div
+                  key={i}
+                  className={
+                    "whitespace-pre-wrap rounded-2xl p-3 shadow overflow-x-auto " + // ← width cap removed, X‑scroll added
+                    (m.role === "user"
+                      ? "bg-blue-500 text-white self-end"
+                      : "bg-white text-gray-900 self-start")
+                  }
+                >
+                  {Array.isArray(m.content?.imageUrls) &&
+                    m.content.imageUrls.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mb-2">
+                        {m.content.imageUrls.map((src, j) => (
+                          <img
+                            key={j}
+                            src={src}
+                            className="w-24 h-24 object-cover rounded-lg"
+                          />
+                        ))}
+                      </div>
                     )}
-                    {typeof m.content === "string" ? m.content : m.content.text}
-                  </div>
-                ))}
+                  {typeof m.content === "string" ? m.content : m.content.text}
+                </div>
+              ))}
             </div>
 
-            <div className="flex items-end gap-2">
-              <textarea
-                rows="1"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={onKey}
-                placeholder="Type a message…"
-                className="flex-1 resize-none border rounded-2xl p-3 shadow focus:outline-none"
-              ></textarea>
+            {/* composer */}
+            <div className="flex flex-col gap-2">
+              {/* image previews */}
+              {images.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {images.map((file, idx) => (
+                    <div key={idx} className="relative">
+                      <img
+                        src={URL.createObjectURL(file)}
+                        className="w-20 h-20 object-cover rounded-lg"
+                      />
+                      <button
+                        onClick={() => remove(idx)}
+                        className="absolute -top-2 -right-2 bg-black/60 text-white
+                                   rounded-full w-5 h-5 text-xs"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-              <input
-                type="file"
-                accept="image/*"
-                id="imageInput"
-                hidden
-                onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
-              />
-              <label
-                htmlFor="imageInput"
-                className="cursor-pointer bg-indigo-500 text-white px-4 py-2 rounded-2xl shadow"
-              >
-                📷
-              </label>
+              <div className="flex items-end gap-2">
+                <textarea
+                  rows="1"
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={onKey}
+                  placeholder="Type a message…"
+                  className="flex-1 resize-none border rounded-2xl p-3 shadow
+                             focus:outline-none"
+                ></textarea>
 
-              <button
-                onClick={sendMessage}
-                disabled={!input.trim() && !imageFile}
-                className="bg-green-500 text-white px-4 py-2 rounded-2xl shadow disabled:opacity-50"
-              >
-                Send
-              </button>
+                <input
+                  id="imgInp"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={onFiles}
+                />
+                <label
+                  htmlFor="imgInp"
+                  className="cursor-pointer bg-indigo-500 text-white px-4 py-2
+                             rounded-2xl shadow"
+                >
+                  📷
+                </label>
 
-              <button
-                onClick={stop}
-                className="bg-red-500 text-white px-4 py-2 rounded-2xl shadow"
-              >
-                Stop
-              </button>
+                <button
+                  onClick={send}
+                  disabled={!input.trim() && images.length === 0}
+                  className="bg-green-500 text-white px-4 py-2 rounded-2xl shadow
+                             disabled:opacity-50"
+                >
+                  Send
+                </button>
+                <button
+                  onClick={stop}
+                  className="bg-red-500 text-white px-4 py-2 rounded-2xl shadow"
+                >
+                  Stop
+                </button>
+              </div>
             </div>
           </div>
         );
