@@ -147,6 +147,9 @@
                         const sectionName = sections[i].toLowerCase();
                         const sectionContent = sections[i + 1]?.trim() || "";
                         
+                        // Filter out ``` markers from the content
+                        const cleanContent = sectionContent.replace(/^```\n?|\n?```$/g, '');
+                        
                         // Only process if this is new content for this section
                         const isNewSection = lastDetectedSection !== sectionName;
                         
@@ -155,7 +158,7 @@
                           
                           // Update content and UI based on section type
                           if (sectionName.startsWith("summary")) {
-                            summaryContent = sectionContent;
+                            summaryContent = cleanContent;
                             setMessages(prev => {
                               const copy = [...prev];
                               copy[placeholderIdx] = {
@@ -165,15 +168,15 @@
                               return copy;
                             });
                           } else if (sectionName.startsWith("schematic")) {
-                            schematicContent = sectionContent;
+                            schematicContent = cleanContent;
                             setSchematic(schematicContent);
                             setActiveTab("schematic");
                           } else if (sectionName.startsWith("pcb") || sectionName.startsWith("board")) {
-                            pcbContent = sectionContent;
+                            pcbContent = cleanContent;
                             setPcb(pcbContent);
                             setActiveTab("pcb");
                           } else if (sectionName.startsWith("bom") || sectionName.includes("list")) {
-                            bomContent = sectionContent;
+                            bomContent = cleanContent;
                             setBom(bomContent);
                             setActiveTab("bom");
                           }
@@ -206,30 +209,34 @@
                 const label = blocks[i]?.toLowerCase() || "";
                 const payload = blocks[i + 1]?.trim() || "";
                 
+                // Clean the payload of ``` markers
+                const cleanPayload = payload.replace(/^```\n?|\n?```$/g, '');
+                
                 if (label.startsWith("summary")) {
                   setMessages(prev => {
                     const copy = [...prev];
                     copy[placeholderIdx] = {
                       role: "assistant",
-                      content: payload,
+                      content: cleanPayload,
                     };
                     return copy;
                   });
                 } else if (label.startsWith("schematic")) {
-                  setSchematic(payload);
+                  setSchematic(cleanPayload);
                 } else if (label.startsWith("pcb") || label.startsWith("board")) {
-                  setPcb(payload);
+                  setPcb(cleanPayload);
                 } else if (label.startsWith("bom") || label.includes("list")) {
-                  setBom(payload);
+                  setBom(cleanPayload);
                 }
               }
             } else if (buffer.trim()) {
               // No sections found, use entire buffer as content
+              const cleanBuffer = buffer.replace(/^```\n?|\n?```$/g, '');
               setMessages(prev => {
                 const copy = [...prev];
                 copy[placeholderIdx] = {
                   role: "assistant",
-                  content: buffer,
+                  content: cleanBuffer,
                 };
                 return copy;
               });
@@ -402,14 +409,104 @@
               {/* tab bodies */}
               {activeTab === "schematic" &&
                 (schematic ? (
-                  <pre className="whitespace-pre overflow-auto">{schematic}</pre>
+                  <pre className="whitespace-pre overflow-auto">
+                    {(() => {
+                      // Create a map of component references to their full search URLs
+                      const componentUrls = {};
+                      if (bom) {
+                        bom.split('\n').forEach(line => {
+                          const parts = line.trim().split(/\s+/);
+                          if (parts.length >= 2) {
+                            const ref = parts[0];
+                            const query = line.trim().replace(/\s+/g, '+');
+                            componentUrls[ref] = `https://www.amazon.com/s?k=${query}`;
+                          }
+                        });
+                      }
+
+                      return schematic.split('\n').map((line, i) => {
+                        // Find component references (e.g., R1, C1, IC1, etc.)
+                        const componentMatch = line.match(/\b([A-Z]+[0-9]+)\b/);
+                        if (componentMatch) {
+                          const ref = componentMatch[1];
+                          const url = componentUrls[ref] || `https://www.amazon.com/s?k=${ref}`;
+                          return (
+                            <div key={i}>
+                              {line.split(/\b([A-Z]+[0-9]+)\b/).map((part, j) => {
+                                if (j % 2 === 1) {
+                                  return (
+                                    <a
+                                      key={j}
+                                      href={url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-indigo-600 hover:underline"
+                                    >
+                                      {part}
+                                    </a>
+                                  );
+                                }
+                                return part;
+                              })}
+                            </div>
+                          );
+                        }
+                        return <div key={i}>{line}</div>;
+                      });
+                    })()}
+                  </pre>
                 ) : (
                   <p className="text-gray-500 italic">No schematic yet.</p>
                 ))}
 
               {activeTab === "pcb" &&
                 (pcb ? (
-                  <pre className="whitespace-pre overflow-auto">{pcb}</pre>
+                  <pre className="whitespace-pre overflow-auto">
+                    {(() => {
+                      // Create a map of component references to their full search URLs
+                      const componentUrls = {};
+                      if (bom) {
+                        bom.split('\n').forEach(line => {
+                          const parts = line.trim().split(/\s+/);
+                          if (parts.length >= 2) {
+                            const ref = parts[0];
+                            const query = line.trim().replace(/\s+/g, '+');
+                            componentUrls[ref] = `https://www.amazon.com/s?k=${query}`;
+                          }
+                        });
+                      }
+
+                      return pcb.split('\n').map((line, i) => {
+                        // Find component references (e.g., R1, C1, IC1, etc.)
+                        const componentMatch = line.match(/\b([A-Z]+[0-9]+)\b/);
+                        if (componentMatch) {
+                          const ref = componentMatch[1];
+                          const url = componentUrls[ref] || `https://www.amazon.com/s?k=${ref}`;
+                          return (
+                            <div key={i}>
+                              {line.split(/\b([A-Z]+[0-9]+)\b/).map((part, j) => {
+                                if (j % 2 === 1) {
+                                  return (
+                                    <a
+                                      key={j}
+                                      href={url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-indigo-600 hover:underline"
+                                    >
+                                      {part}
+                                    </a>
+                                  );
+                                }
+                                return part;
+                              })}
+                            </div>
+                          );
+                        }
+                        return <div key={i}>{line}</div>;
+                      });
+                    })()}
+                  </pre>
                 ) : (
                   <p className="text-gray-500 italic">No PCB layout yet.</p>
                 ))}
