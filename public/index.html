@@ -2,68 +2,100 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Cloudflare AI Chat</title>
+    <title>Cloudflare AI – Multimodal Chat</title>
 
     <!-- Tailwind for quick styling -->
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
 
   <body class="bg-gray-100">
-    <!-- Mount point -->
     <div id="root" class="h-screen"></div>
 
-    <!-- React + React‑DOM (development builds) -->
+    <!-- React + React‑DOM (dev builds) -->
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 
     <!-- Babel so we can write JSX right here -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- ChatApp component -->
     <script type="text/babel">
       const { useState, useRef, useEffect } = React;
 
       function ChatApp() {
-        const [messages, setMessages] = useState([
+        const [messages, setMessages]   = useState([
           { role: "system", content: "You are a friendly assistant" },
         ]);
-        const [input, setInput] = useState("");
-        const controllerRef = useRef(null);
-        const listRef = useRef(null);
+        const [input, setInput]         = useState("");
+        const [imageFile, setImageFile] = useState(null);   // <-- NEW
+        const controllerRef             = useRef(null);
+        const listRef                   = useRef(null);
 
-        // auto‑scroll on every new message
+        /* auto‑scroll on every new message */
         useEffect(() => {
           listRef.current?.scrollTo({
-            top: listRef.current.scrollHeight,
+            top:      listRef.current.scrollHeight,
             behavior: "smooth",
           });
         }, [messages]);
 
+        /* helper – read File → data URL */
+        function readAsDataURL(file) {
+          return new Promise((res, rej) => {
+            const fr = new FileReader();
+            fr.onload  = () => res(fr.result);
+            fr.onerror = rej;
+            fr.readAsDataURL(file);
+          });
+        }
+
         async function sendMessage() {
-          const content = input.trim();
-          if (!content) return;
+          const text = input.trim();
+          if (!text && !imageFile) return;   // nothing to send
 
-          const userMsg = { role: "user", content };
-          const convo = [...messages, userMsg];
+          const userBubble = {
+            role: "user",
+            content: { text, image: imageFile ? URL.createObjectURL(imageFile) : null },
+          };
 
-          // placeholder assistant so UI shows a streaming bubble
-          setMessages([...convo, { role: "assistant", content: "" }]);
+          /* For UI we keep a simple object; for the Worker we’ll build the
+             proper messages + image separately. */
+          setMessages((prev) => [...prev, userBubble, { role: "assistant", content: "" }]);
           setInput("");
+          setImageFile(null);
           controllerRef.current = new AbortController();
+
+          /* ---- Build request body ---- */
+          const convo = messages
+            .filter((m) => m.role !== "system")  // omit system prompt already at top
+            .map((m) => {
+              if (m.role !== "user") return m;   // assistant messages stay the same
+              /* unwrap our UI helper object */
+              if (typeof m.content === "string") {
+                return { role: "user", content: m.content };
+              }
+              return { role: "user", content: m.content.text };
+            });
+          convo.push({ role: "user", content: text });      // add current message
+
+          const body = { messages: convo };
+
+          if (imageFile) {
+            body.image = await readAsDataURL(imageFile);    // base64 data URL
+          }
 
           try {
             const res = await fetch("/api/chat", {
-              method: "POST",
+              method:  "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ messages: convo }),
-              signal: controllerRef.current.signal,
+              body:    JSON.stringify(body),
+              signal:  controllerRef.current.signal,
             });
             if (!res.ok || !res.body) throw new Error(res.statusText);
 
-            const reader = res.body.getReader();
+            const reader  = res.body.getReader();
             const decoder = new TextDecoder("utf-8");
-            let buffer = ""; // shown to the user
-            let tail = "";   // stores partial line between reads
+            let buffer    = "";
+            let tail      = "";
 
             while (true) {
               const { value, done } = await reader.read();
@@ -71,7 +103,7 @@
 
               tail += decoder.decode(value, { stream: true });
               const lines = tail.split(/\r?\n/);
-              tail = lines.pop() ?? ""; // last element might be incomplete
+              tail        = lines.pop() ?? "";            // hold incomplete
 
               for (const line of lines) {
                 if (!line.startsWith("data:")) continue;
@@ -84,15 +116,12 @@
                     buffer += obj.response;
                     setMessages((prev) => {
                       const copy = [...prev];
-                      copy[copy.length - 1] = {
-                        role: "assistant",
-                        content: buffer,
-                      };
+                      copy[copy.length - 1] = { role: "assistant", content: buffer };
                       return copy;
                     });
                   }
                 } catch {
-                  // ignore — we’ll get the rest of the JSON next chunk
+                  /* wait for the rest of the JSON in the next chunk */
                 }
               }
             }
@@ -127,18 +156,26 @@
                   <div
                     key={i}
                     className={
-                      "whitespace-pre-wrap rounded-2xl p-3 shadow " +
+                      "max-w-[70%] whitespace-pre-wrap rounded-2xl p-3 shadow " +
                       (m.role === "user"
                         ? "bg-blue-500 text-white self-end"
                         : "bg-white text-gray-900 self-start")
                     }
                   >
-                    {m.content}
+                    {/* show image if present (only for user bubbles) */}
+                    {m.content?.image && (
+                      <img
+                        src={m.content.image}
+                        alt="uploaded"
+                        className="mb-2 rounded-lg max-h-48 object-contain"
+                      />
+                    )}
+                    {typeof m.content === "string" ? m.content : m.content.text}
                   </div>
                 ))}
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex items-end gap-2">
               <textarea
                 rows="1"
                 value={input}
@@ -148,9 +185,23 @@
                 className="flex-1 resize-none border rounded-2xl p-3 shadow focus:outline-none"
               ></textarea>
 
+              <input
+                type="file"
+                accept="image/*"
+                id="imageInput"
+                hidden
+                onChange={(e) => setImageFile(e.target.files?.[0] ?? null)}
+              />
+              <label
+                htmlFor="imageInput"
+                className="cursor-pointer bg-indigo-500 text-white px-4 py-2 rounded-2xl shadow"
+              >
+                📷
+              </label>
+
               <button
                 onClick={sendMessage}
-                disabled={!input.trim()}
+                disabled={!input.trim() && !imageFile}
                 className="bg-green-500 text-white px-4 py-2 rounded-2xl shadow disabled:opacity-50"
               >
                 Send
@@ -167,7 +218,6 @@
         );
       }
 
-      // Mount
       ReactDOM.createRoot(document.getElementById("root")).render(<ChatApp />);
     </script>
   </body>
