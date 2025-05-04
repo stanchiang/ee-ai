@@ -289,7 +289,7 @@
                       }
                       title={m.role === "assistant" ? "Click to view on right" : undefined}
                       className={
-                        "whitespace-pre rounded-2xl p-3 shadow overflow-x-auto overflow-y-auto cursor-pointer " +
+                        "whitespace-pre-wrap rounded-2xl p-3 shadow overflow-x-auto overflow-y-auto cursor-pointer " +
                         (m.role === "user"
                           ? "bg-blue-500 text-white self-end"
                           : "bg-white text-gray-900 self-start")
@@ -340,7 +340,7 @@
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={onKey}
-                    placeholder='Describe the circuit you need…'
+                    placeholder='Lets design some hardware…'
                     className="flex-1 resize-none border rounded-2xl p-3 shadow focus:outline-none"
                   ></textarea>
 
@@ -366,17 +366,7 @@
                   >
                     Send
                   </button>
-                  <button
-                    onClick={stop}
-                    className="bg-red-500 text-white px-4 py-2 rounded-2xl shadow"
-                  >
-                    Stop
-                  </button>
                 </div>
-                <p className="text-xs text-gray-500 pl-1">
-                  Tip: Drop a photo of your timer (or any gadget) and hit "Send" – the
-                  AI will reverse‑engineer its circuit.
-                </p>
               </div>
             </div>
 
